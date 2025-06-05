@@ -1,0 +1,57 @@
+name: Build and Push Docker Image
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      concourse_version:
+        description: 'Specific Concourse version to build (leave empty for latest)'
+        required: false
+        type: string
+
+env:
+  DOCKER_IMAGE: betterweb/concourseci-client-flycli
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Get latest Concourse release
+        id: concourse_version
+        if: ${{ !inputs.concourse_version }}
+        run: |
+          LATEST_VERSION=$(curl -s https://api.github.com/repos/concourse/concourse/releases/latest | jq -r .tag_name)
+          LATEST_VERSION_NUM=${LATEST_VERSION#v}
+          echo "VERSION=$LATEST_VERSION_NUM" >> $GITHUB_OUTPUT
+
+      - name: Set manual version
+        id: manual_version
+        if: ${{ inputs.concourse_version }}
+        run: |
+          echo "VERSION=${{ inputs.concourse_version }}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_HUB_USER }}
+          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            CONCOURSE_VERSION=${{ inputs.concourse_version || steps.concourse_version.outputs.VERSION }}
+          tags: |
+            ${{ env.DOCKER_IMAGE }}:latest
+            ${{ env.DOCKER_IMAGE }}:${{ inputs.concourse_version || steps.concourse_version.outputs.VERSION }} 
